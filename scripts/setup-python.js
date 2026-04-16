@@ -11,10 +11,9 @@
  */
 
 import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, unlinkSync, createWriteStream } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createWriteStream } from 'node:fs';
 import https from 'node:https';
 import os from 'node:os';
 
@@ -67,10 +66,25 @@ async function downloadFile(url, dest) {
 
 function extractTarGz(tarPath, destDir) {
   mkdirSync(destDir, { recursive: true });
-  // --strip-components=1 removes the top-level "python/" wrapper directory
-  // On Windows, tar might mistake "C:\" for a remote tape drive host; --force-local fixes this.
-  const forceLocal = os.platform() === 'win32' ? ' --force-local' : '';
-  execSync(`tar${forceLocal} -xzf "${tarPath}" -C "${destDir}" --strip-components=1`, { stdio: 'inherit' });
+  
+  if (os.platform() === 'win32') {
+    // Windows tar often chokes on drive letters (C:\) because it thinks it's a remote host.
+    // We'll copy the file to the destination dir temporarily to use a relative path.
+    const tmpTarName = 'bundle.tar.gz';
+    const tmpTarPath = join(destDir, tmpTarName);
+    copyFileSync(tarPath, tmpTarPath);
+    try {
+      execSync(`tar -xzf ${tmpTarName} --strip-components=1`, { 
+        stdio: 'inherit', 
+        cwd: destDir 
+      });
+    } finally {
+      if (existsSync(tmpTarPath)) unlinkSync(tmpTarPath);
+    }
+  } else {
+    // Unix tar is well-behaved.
+    execSync(`tar -xzf "${tarPath}" -C "${destDir}" --strip-components=1`, { stdio: 'inherit' });
+  }
 }
 
 // ── Write .cargo/config.toml so PyO3 finds the bundled interpreter ───────────
