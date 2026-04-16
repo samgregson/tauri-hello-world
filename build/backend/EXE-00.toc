@@ -207,7 +207,7 @@
  [],
  False,
  False,
- 1776285824,
+ 1776286389,
  [('run',
    '/home/sam/.gemini/antigravity/scratch/tauri-hello-world/venv/lib/python3.14/site-packages/PyInstaller/bootloader/Linux-64bit-intel/run',
    'EXECUTABLE')],

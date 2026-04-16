@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build:frontend": "tsc && vite build",
-    "build:backend": "./venv/bin/pyinstaller --onefile backend/main.py --name backend && mv dist/backend src-tauri/bin/backend-x86_64-unknown-linux-gnu",
+    "build:backend": "node scripts/build-backend.js",
     "build": "npm run build:backend && npm run build:frontend",
     "tauri": "tauri"
   },
