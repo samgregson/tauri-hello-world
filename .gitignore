@@ -25,6 +25,7 @@ dist-ssr
 
 # Bundled Python/MCP (Managed by setup-python.js)
 src-tauri/resources/python/
+src-tauri/resources/python.tar.gz
 .cargo/config.toml
 
 # Byte-compiled / optimized / DLL files

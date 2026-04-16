@@ -79,21 +79,56 @@ fn get_resource_dir() -> PathBuf {
 /// Configure `PYTHONHOME` and `PYTHONPATH` so the embedded CPython interpreter
 /// finds the bundled standard library and installed packages.
 fn setup_python_env(resources: &PathBuf) {
-    let python_home = resources.join("python");
+    // ── 1. Determine the Python Runtime Location ─────────────────────────────
+    // In dev: resources/python/ folder exists.
+    // In prod: only resources/python.tar.gz exists; we must extract it.
+    
+    let python_home = if resources.join("python").join("lib").exists() || resources.join("python").join("Lib").exists() {
+        // We are in dev or already extracted
+        resources.join("python")
+    } else {
+        // We are in production and need to extract the bundle
+        let archive = resources.join("python.tar.gz");
+        
+        // Target: %LOCALAPPDATA% / <id> / python
+        let data_dir = std::env::var("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| resources.clone()); // fallback
+        
+        let target_dir = data_dir.join("tauri-hello-world").join("python");
+        
+        if !target_dir.exists() {
+            eprintln!("[mcp] First run: Extracting Python environment to {} ...", target_dir.display());
+            std::fs::create_dir_all(&target_dir).ok();
+            
+            // Call system 'tar' to extract. 
+            // Note: On Windows 10 (1803+) and 11, 'tar' is built-in.
+            let status = std::process::Command::new("tar")
+                .arg("-xzf")
+                .arg(&archive)
+                .arg("--strip-components=1")
+                .arg("-C")
+                .arg(&target_dir)
+                .status();
+                
+            if status.is_err() || !status.unwrap().success() {
+                eprintln!("[mcp] Error: Failed to extract Python bundle.");
+            }
+        }
+        target_dir
+    };
+
     let mcp_server_dir = resources.join("mcp_server");
 
     // PYTHONHOME tells CPython where its own stdlib lives.
     std::env::set_var("PYTHONHOME", &python_home);
 
-    // Build PYTHONPATH: site-packages (fastmcp, pywin32, …) + our server code.
-    // The exact site-packages path differs between Windows and Linux layouts.
+    // Build PYTHONPATH: site-packages + our server code.
     #[cfg(windows)]
     let site_packages = python_home.join("Lib").join("site-packages");
     #[cfg(not(windows))]
     let site_packages = {
-        // python-build-standalone on Linux: lib/python3.12/site-packages
         let lib = python_home.join("lib");
-        // Find the versioned python directory (python3.x)
         std::fs::read_dir(&lib)
             .ok()
             .and_then(|mut entries| {
@@ -115,9 +150,6 @@ fn setup_python_env(resources: &PathBuf) {
     .join(sep);
 
     std::env::set_var("PYTHONPATH", pythonpath);
-
-    eprintln!("[mcp] PYTHONHOME = {}", python_home.display());
-    eprintln!("[mcp] PYTHONPATH = {}", std::env::var("PYTHONPATH").unwrap_or_default());
 }
 
 /// Run the FastMCP server on stdio.

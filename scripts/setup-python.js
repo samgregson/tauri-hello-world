@@ -160,7 +160,30 @@ async function main() {
     }
   }
 
-  console.log('\n✅  setup-python complete!\n');
+  // ── Cleanup + Compress (Optimizes for MSI/NSIS) ───────────────────────────
+  console.log('\nCleaning up and compressing Python (optimizing for MSI) …');
+  
+  // Remove __pycache__ and test files to reduce file count/size
+  try {
+    const rmCmd = os.platform() === 'win32' 
+      ? `powershell -Command "Get-ChildItem -Path '${pythonDir}' -Include __pycache__ -Recycle -Force -ErrorAction SilentlyContinue | Remove-Item -Recycle -Force"`
+      : `find "${pythonDir}" -name "__pycache__" -type d -exec rm -rf {} +`;
+    execSync(rmCmd, { stdio: 'ignore' });
+  } catch (_) {}
+
+  // Create the archive inside the resources folder
+  const archivePath = join(resourcesDir, 'python.tar.gz');
+  console.log(`Creating ${archivePath} …`);
+  
+  if (os.platform() === 'win32') {
+    execSync(`tar -czf python.tar.gz python`, { cwd: resourcesDir, stdio: 'inherit' });
+  } else {
+    execSync(`tar -czf python.tar.gz python`, { cwd: resourcesDir, stdio: 'inherit' });
+  }
+
+  // NOTE: We KEEP the python/ directory in development so 'cargo run' still works.
+  // The CI environment will use the .tar.gz for the final bundle.
+  console.log('\n✅  setup-python complete! (Python is now optimized for bundling)\n');
   console.log('Next steps:');
   console.log('  npm run tauri dev       — start the app in dev mode');
   console.log('  npm run tauri build     — build the release installer');
