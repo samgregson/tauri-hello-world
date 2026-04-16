@@ -9,20 +9,7 @@ jobs:
   release:
     permissions:
       contents: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - platform: 'macos-latest' # for x86_64 and aarch64
-            target: 'x86_64-apple-darwin'
-          - platform: 'macos-latest'
-            target: 'aarch64-apple-darwin'
-          - platform: 'ubuntu-22.04'
-            target: 'x86_64-unknown-linux-gnu'
-          - platform: 'windows-latest'
-            target: 'x86_64-pc-windows-msvc'
-
-    runs-on: ${{ matrix.platform }}
+    runs-on: windows-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -36,32 +23,15 @@ jobs:
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.11'
-          cache: 'pip'
-
-      - name: Install Python dependencies
-        run: |
-          pip install -r backend/requirements.txt pyinstaller
-
-      - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file libssl-dev libgtk-3-dev libayatana-appindicator3-dev librsvg2-dev
+          targets: x86_64-pc-windows-msvc
 
       - name: Install Frontend dependencies
         run: npm install
 
-      - name: Build Backend Sidecar
+      - name: Prepare Embedded Python Environment
+        run: npm run setup-python
         shell: bash
-        run: |
-          # Use our cross-platform script
-          TARGET_TRIPLE=${{ matrix.target }} node scripts/build-backend.cjs
+        # This script downloads the Windows portable Python and installs fastmcp/pywin32.
 
       - name: Build with Tauri Action
         uses: tauri-apps/tauri-action@v0
@@ -69,8 +39,8 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
           tagName: v__VERSION__
-          releaseName: "App v__VERSION__"
-          releaseBody: "Automated release from GitHub Actions"
+          releaseName: "Engineering Tools v__VERSION__"
+          releaseBody: "Automated release with embedded Python MCP server."
           releaseDraft: true
           prerelease: false
-          args: --target ${{ matrix.target }}
+          args: --target x86_64-pc-windows-msvc
