@@ -68,7 +68,9 @@ async function downloadFile(url, dest) {
 function extractTarGz(tarPath, destDir) {
   mkdirSync(destDir, { recursive: true });
   // --strip-components=1 removes the top-level "python/" wrapper directory
-  execSync(`tar -xzf "${tarPath}" -C "${destDir}" --strip-components=1`, { stdio: 'inherit' });
+  // On Windows, tar might mistake "C:\" for a remote tape drive host; --force-local fixes this.
+  const forceLocal = os.platform() === 'win32' ? ' --force-local' : '';
+  execSync(`tar${forceLocal} -xzf "${tarPath}" -C "${destDir}" --strip-components=1`, { stdio: 'inherit' });
 }
 
 // ── Write .cargo/config.toml so PyO3 finds the bundled interpreter ───────────
