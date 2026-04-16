@@ -61,7 +61,7 @@ jobs:
         shell: bash
         run: |
           # Use our cross-platform script
-          TARGET_TRIPLE=${{ matrix.target }} node scripts/build-backend.js
+          TARGET_TRIPLE=${{ matrix.target }} node scripts/build-backend.cjs
 
       - name: Build with Tauri Action
         uses: tauri-apps/tauri-action@v0

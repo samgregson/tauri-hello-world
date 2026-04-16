@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build:frontend": "tsc && vite build",
-    "build:backend": "node scripts/build-backend.js",
+    "build:backend": "node scripts/build-backend.cjs",
     "build": "npm run build:backend && npm run build:frontend",
     "tauri": "tauri"
   },
