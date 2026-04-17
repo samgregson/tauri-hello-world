@@ -25,11 +25,26 @@ fn main() {
 
     #[cfg(windows)]
     {
-        // Delay-load the Python DLL. This serves two vital purposes:
-        // 1. Prevents immediate crash if python312.dll is not precisely next to the EXE.
-        // 2. Reduces AV heuristic flags, as the executable doesn't statically bind the scripting engine.
-        println!("cargo:rustc-link-arg=delayimp.lib");
-        println!("cargo:rustc-link-arg=/DELAYLOAD:python312.dll");
+        // MSVC does not support delay-loading DLLs that export data symbols, so 
+        // /DELAYLOAD:python312.dll fails to link.
+        // Instead, we copy the required Python DLLs directly into the target output 
+        // directory (next to the executable) so the Windows PE loader finds them immediately.
+        
+        if let Ok(out_dir) = std::env::var("OUT_DIR") {
+            let target_dir = std::path::PathBuf::from(out_dir).join("../../../");
+            
+            let py312_src = std::path::Path::new(&resources_dir).join("python/python312.dll");
+            let py312_dest = target_dir.join("python312.dll");
+            if py312_src.exists() {
+                let _ = std::fs::copy(&py312_src, &py312_dest);
+            }
+            
+            let py3_src = std::path::Path::new(&resources_dir).join("python/python3.dll");
+            let py3_dest = target_dir.join("python3.dll");
+            if py3_src.exists() {
+                let _ = std::fs::copy(&py3_src, &py3_dest);
+            }
+        }
     }
 
     // Re-run if the python directory appears or changes

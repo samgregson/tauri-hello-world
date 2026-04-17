@@ -85,20 +85,6 @@ fn setup_python_env(resources: &PathBuf) {
     // PYTHONHOME tells CPython where its own stdlib lives.
     std::env::set_var("PYTHONHOME", &python_home);
 
-    // On Windows, the DLL is delay-loaded. We must add the resource dir to PATH 
-    // before any pyo3 function is called so the Windows loader can find python312.dll.
-    #[cfg(windows)]
-    {
-        if let Ok(mut path) = std::env::var("PATH") {
-            if !path.is_empty() {
-                path = format!("{};{}", python_home.display(), path);
-            } else {
-                path = python_home.display().to_string();
-            }
-            std::env::set_var("PATH", path);
-        }
-    }
-
     // Build PYTHONPATH: site-packages + our server code.
     #[cfg(windows)]
     let site_packages = python_home.join("Lib").join("site-packages");
