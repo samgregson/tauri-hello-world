@@ -79,45 +79,7 @@ fn get_resource_dir() -> PathBuf {
 /// Configure `PYTHONHOME` and `PYTHONPATH` so the embedded CPython interpreter
 /// finds the bundled standard library and installed packages.
 fn setup_python_env(resources: &PathBuf) {
-    // ── 1. Determine the Python Runtime Location ─────────────────────────────
-    // In dev: resources/python/ folder exists.
-    // In prod: only resources/python.tar.gz exists; we must extract it.
-    
-    let python_home = if resources.join("python").join("lib").exists() || resources.join("python").join("Lib").exists() {
-        // We are in dev or already extracted
-        resources.join("python")
-    } else {
-        // We are in production and need to extract the bundle
-        let archive = resources.join("python.tar.gz");
-        
-        // Target: %LOCALAPPDATA% / <id> / python
-        let data_dir = std::env::var("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| resources.clone()); // fallback
-        
-        let target_dir = data_dir.join("tauri-hello-world").join("python");
-        
-        if !target_dir.exists() {
-            eprintln!("[mcp] First run: Extracting Python environment to {} ...", target_dir.display());
-            std::fs::create_dir_all(&target_dir).ok();
-            
-            // Call system 'tar' to extract. 
-            // Note: On Windows 10 (1803+) and 11, 'tar' is built-in.
-            let status = std::process::Command::new("tar")
-                .arg("-xzf")
-                .arg(&archive)
-                .arg("--strip-components=1")
-                .arg("-C")
-                .arg(&target_dir)
-                .status();
-                
-            if status.is_err() || !status.unwrap().success() {
-                eprintln!("[mcp] Error: Failed to extract Python bundle.");
-            }
-        }
-        target_dir
-    };
-
+    let python_home = resources.join("python");
     let mcp_server_dir = resources.join("mcp_server");
 
     // PYTHONHOME tells CPython where its own stdlib lives.

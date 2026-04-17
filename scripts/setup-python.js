@@ -160,30 +160,45 @@ async function main() {
     }
   }
 
-  // ── Cleanup + Compress (Optimizes for MSI/NSIS) ───────────────────────────
-  console.log('\nCleaning up and compressing Python (optimizing for MSI) …');
+  // ── Aggressive Cleanup (Optimizes for size and AV safety) ────────────────
+  console.log('\nStripping non-essential Python files to improve safety …');
   
-  // Remove __pycache__ and test files to reduce file count/size
+  const junkFolders = [
+    'tcl', 'tk', 'tcl8', 'tcl8.6', 'tk8.6', 'test', 'tests', 
+    'idlelib', 'tkinter', 'distutils', 'ensurepip', 'lib2to3'
+  ];
+
   try {
-    const rmCmd = os.platform() === 'win32' 
-      ? `powershell -Command "Get-ChildItem -Path '${pythonDir}' -Include __pycache__ -Recycle -Force -ErrorAction SilentlyContinue | Remove-Item -Recycle -Force"`
+    for (const folder of junkFolders) {
+      const p1 = join(pythonDir, folder);
+      const p2 = join(pythonDir, 'lib', folder);
+      const p3 = join(pythonDir, 'Lib', folder);
+      
+      const targets = [p1, p2, p3];
+      for (const t of targets) {
+        if (existsSync(t)) {
+          const rmCmd = os.platform() === 'win32' 
+            ? `powershell -Command "Remove-Item -Recycle -Force -RelativePath -ErrorAction SilentlyContinue '${t}'"`
+            : `rm -rf "${t}"`;
+          try { execSync(rmCmd, { stdio: 'ignore' }); } catch (_) {}
+        }
+      }
+    }
+
+    // Remove all .pyc and __pycache__
+    const cleanCmd = os.platform() === 'win32'
+      ? `powershell -Command "Get-ChildItem -Path '${pythonDir}' -Include __pycache__,.pyc,.pyo -Recycle -Force -ErrorAction SilentlyContinue | Remove-Item -Recycle -Force"`
       : `find "${pythonDir}" -name "__pycache__" -type d -exec rm -rf {} +`;
-    execSync(rmCmd, { stdio: 'ignore' });
+    execSync(cleanCmd, { stdio: 'ignore' });
   } catch (_) {}
 
   // Create the archive inside the resources folder
   const archivePath = join(resourcesDir, 'python.tar.gz');
-  console.log(`Creating ${archivePath} …`);
-  
-  if (os.platform() === 'win32') {
-    execSync(`tar -czf python.tar.gz python`, { cwd: resourcesDir, stdio: 'inherit' });
-  } else {
-    execSync(`tar -czf python.tar.gz python`, { cwd: resourcesDir, stdio: 'inherit' });
-  }
+  console.log(`Creating ${archivePath} (now much smaller) …`);
+  execSync(`tar -czf python.tar.gz python`, { cwd: resourcesDir, stdio: 'inherit' });
 
   // NOTE: We KEEP the python/ directory in development so 'cargo run' still works.
-  // The CI environment will use the .tar.gz for the final bundle.
-  console.log('\n✅  setup-python complete! (Python is now optimized for bundling)\n');
+  console.log('\n✅  setup-python complete! (Python is now minimized and optimized)\n');
   console.log('Next steps:');
   console.log('  npm run tauri dev       — start the app in dev mode');
   console.log('  npm run tauri build     — build the release installer');
