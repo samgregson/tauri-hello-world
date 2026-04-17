@@ -190,15 +190,24 @@ async function main() {
       ? `powershell -Command "Get-ChildItem -Path '${pythonDir}' -Include __pycache__,.pyc,.pyo -Recycle -Force -ErrorAction SilentlyContinue | Remove-Item -Recycle -Force"`
       : `find "${pythonDir}" -name "__pycache__" -type d -exec rm -rf {} +`;
     execSync(cleanCmd, { stdio: 'ignore' });
+
+    // 🚨 CRITICAL: Remove all nested executables (*.exe)
+    // Dropping unsigned .exe files deeply nested inside an NSIS/MSI triggers corporate EDRs.
+    // Our Rust binary loads Python via DLLs; it never executes python.exe directly.
+    const exeCleanCmd = os.platform() === 'win32'
+      ? `powershell -Command "Get-ChildItem -Path '${pythonDir}' -Filter *.exe -Recycle -Force -ErrorAction SilentlyContinue | Remove-Item -Recycle -Force"`
+      : `find "${pythonDir}" -name "*.exe" -type f -delete`;
+    execSync(exeCleanCmd, { stdio: 'ignore' });
+    
   } catch (_) {}
 
   // Create the archive inside the resources folder
   const archivePath = join(resourcesDir, 'python.tar.gz');
-  console.log(`Creating ${archivePath} (now much smaller) …`);
+  console.log(`Creating ${archivePath} (now much smaller and EXE-free) …`);
   execSync(`tar -czf python.tar.gz python`, { cwd: resourcesDir, stdio: 'inherit' });
 
   // NOTE: We KEEP the python/ directory in development so 'cargo run' still works.
-  console.log('\n✅  setup-python complete! (Python is now minimized and optimized)\n');
+  console.log('\n✅  setup-python complete! (Python is minimized and EDR-friendly)\n');
   console.log('Next steps:');
   console.log('  npm run tauri dev       — start the app in dev mode');
   console.log('  npm run tauri build     — build the release installer');

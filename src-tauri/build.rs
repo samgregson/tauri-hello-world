@@ -19,9 +19,17 @@ fn main() {
         if lib_path.exists() {
             println!("cargo:rustc-link-search=native={}", lib_dir);
             // Bake an absolute RPATH for development builds.
-            // The production Linux AppImage is not a target (Windows-only release).
             println!("cargo:rustc-link-arg=-Wl,-rpath,{}", lib_dir);
         }
+    }
+
+    #[cfg(windows)]
+    {
+        // Delay-load the Python DLL. This serves two vital purposes:
+        // 1. Prevents immediate crash if python312.dll is not precisely next to the EXE.
+        // 2. Reduces AV heuristic flags, as the executable doesn't statically bind the scripting engine.
+        println!("cargo:rustc-link-arg=delayimp.lib");
+        println!("cargo:rustc-link-arg=/DELAYLOAD:python312.dll");
     }
 
     // Re-run if the python directory appears or changes
