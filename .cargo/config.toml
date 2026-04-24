@@ -1,2 +1,1 @@
-# Cargo configuration for tauri-hello-world
-# (PYO3_PYTHON removed — Python is now user-installed, not embedded)
+# Cargo configuration — Python is user-installed, not embedded

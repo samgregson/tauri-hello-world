@@ -105,6 +105,34 @@ pub fn run_mcp_server() {
     }
 }
 
+// ── Setup CLI entry point ────────────────────────────────────────────────────
+
+/// Command line entry point for pre-creating the Python environment.
+/// Called by dev tools like `setup-python.js` to ensure the venv exists.
+pub fn setup_python_cli() {
+    let resources = get_resource_dir();
+    let requirements = resources.join("mcp_server").join("requirements.txt");
+
+    println!("\n🔍  Finding system Python...");
+    let system_python = find_system_python().unwrap_or_else(|| {
+        eprintln!("❌  Python 3.10+ not found on PATH or in common install locations.");
+        eprintln!("    Install Python from https://python.org and ensure it is on PATH.\n");
+        std::process::exit(1);
+    });
+    println!("✓  Python -> {}\n", system_python.display());
+
+    match ensure_venv(&system_python, &requirements) {
+        Ok(venv_py) => {
+            println!("✓  Venv created/verified -> {}", venv_py.display());
+            println!("✅  Setup complete!\n");
+        }
+        Err(e) => {
+            eprintln!("❌  Failed to set up Python environment: {e}");
+            std::process::exit(1);
+        }
+    }
+}
+
 // ── Python discovery ─────────────────────────────────────────────────────────
 
 /// Try to run a Python executable and return its path if it is version ≥ 3.10.
@@ -185,6 +213,7 @@ fn app_data_dir() -> PathBuf {
             .map(PathBuf::from)
             .unwrap_or_else(|_| PathBuf::from("."))
             .join("EngineeringTools")
+            .join("tauri-hello-world")
     }
     #[cfg(not(windows))]
     {
@@ -196,6 +225,7 @@ fn app_data_dir() -> PathBuf {
                     .join("share")
             })
             .join("EngineeringTools")
+            .join("tauri-hello-world")
     }
 }
 
@@ -249,6 +279,11 @@ fn ensure_venv(system_python: &Path, requirements: &Path) -> Result<PathBuf, Str
 
     if needs_install && requirements.exists() {
         eprintln!("[mcp] Installing Python requirements ...");
+        
+        // Remove the stamp before installing, so if pip fails midway or is interrupted, 
+        // the stamp is not left in a valid state while the venv is broken.
+        let _ = std::fs::remove_file(&stamp);
+        
         let status = Command::new(&python)
             .args(["-m", "pip", "install", "-q", "--disable-pip-version-check", "-r"])
             .arg(requirements)
