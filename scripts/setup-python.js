@@ -1,219 +1,136 @@
 #!/usr/bin/env node
 /**
- * Sets up an embedded Python interpreter (python-build-standalone) and
- * installs the required packages for the MCP server.
+ * setup-python.js
  *
- * Outputs:
- *   src-tauri/resources/python/    ← portable CPython distribution
- *   .cargo/config.toml             ← points PYO3_PYTHON at the bundled interpreter
+ * Development helper: finds the user's system Python, creates the app venv,
+ * and installs required packages into it.
+ *
+ * This is OPTIONAL — the Tauri app does the same automatically at runtime.
+ * Run it manually to pre-warm the environment or verify Python is on PATH.
  *
  * Run: node scripts/setup-python.js
  */
 
-import { execSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync, readFileSync, copyFileSync, unlinkSync, createWriteStream } from 'node:fs';
+import { execSync, spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import https from 'node:https';
 import os from 'node:os';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const projectRoot = resolve(__dirname, '..');
-const srcTauriDir = join(projectRoot, 'src-tauri');
-const resourcesDir = join(srcTauriDir, 'resources');
-const pythonDir = join(resourcesDir, 'python');
+const requirementsTxt = join(projectRoot, 'src-tauri', 'resources', 'mcp_server', 'requirements.txt');
 
-// ── Version pins ────────────────────────────────────────────────────────────
-const PYTHON_VERSION = '3.12.10';
-const BUILD_DATE = '20250409';    // release tag on astral-sh/python-build-standalone
-
-// ── Platform detection ───────────────────────────────────────────────────────
-function getPlatformTriple() {
-  const p = os.platform();
-  const a = os.arch();
-  if (p === 'win32')  return a === 'x64' ? 'x86_64-pc-windows-msvc'       : 'i686-pc-windows-msvc';
-  if (p === 'linux')  return a === 'x64' ? 'x86_64-unknown-linux-gnu'      : 'aarch64-unknown-linux-gnu';
-  if (p === 'darwin') return a === 'arm64' ? 'aarch64-apple-darwin'        : 'x86_64-apple-darwin';
-  throw new Error(`Unsupported platform: ${p} ${a}`);
-}
-
-function getPythonExe() {
-  return os.platform() === 'win32'
-    ? join(pythonDir, 'python.exe')
-    : join(pythonDir, 'bin', 'python3.12');
-}
-
-// ── Download helpers ─────────────────────────────────────────────────────────
-async function downloadFile(url, dest) {
-  return new Promise((resolve, reject) => {
-    const follow = (u) => {
-      https.get(u, (res) => {
-        if (res.statusCode === 301 || res.statusCode === 302) {
-          return follow(res.headers.location);
-        }
-        if (res.statusCode !== 200) {
-          return reject(new Error(`HTTP ${res.statusCode} downloading ${u}`));
-        }
-        const f = createWriteStream(dest);
-        res.pipe(f);
-        f.on('finish', () => { f.close(); resolve(); });
-        f.on('error', reject);
-      }).on('error', reject);
-    };
-    follow(url);
-  });
-}
-
-function extractTarGz(tarPath, destDir) {
-  mkdirSync(destDir, { recursive: true });
-  
+// ── Venv location — must match the paths used in src-tauri/src/lib.rs ────────
+function getVenvDir() {
   if (os.platform() === 'win32') {
-    // Windows tar often chokes on drive letters (C:\) because it thinks it's a remote host.
-    // We'll copy the file to the destination dir temporarily to use a relative path.
-    const tmpTarName = 'bundle.tar.gz';
-    const tmpTarPath = join(destDir, tmpTarName);
-    copyFileSync(tarPath, tmpTarPath);
-    try {
-      execSync(`tar -xzf ${tmpTarName} --strip-components=1`, { 
-        stdio: 'inherit', 
-        cwd: destDir 
-      });
-    } finally {
-      if (existsSync(tmpTarPath)) unlinkSync(tmpTarPath);
-    }
-  } else {
-    // Unix tar is well-behaved.
-    execSync(`tar -xzf "${tarPath}" -C "${destDir}" --strip-components=1`, { stdio: 'inherit' });
+    const base = process.env.LOCALAPPDATA || join(os.homedir(), 'AppData', 'Local');
+    return join(base, 'EngineeringTools', 'venv');
   }
+  const base = process.env.XDG_DATA_HOME || join(os.homedir(), '.local', 'share');
+  return join(base, 'EngineeringTools', 'venv');
 }
 
-// ── Write .cargo/config.toml so PyO3 finds the bundled interpreter ───────────
-function writeCargoConfig() {
-  const cargoDir = join(projectRoot, '.cargo');
-  const configPath = join(cargoDir, 'config.toml');
-  mkdirSync(cargoDir, { recursive: true });
+function getVenvPython(venvDir) {
+  return os.platform() === 'win32'
+    ? join(venvDir, 'Scripts', 'python.exe')
+    : join(venvDir, 'bin', 'python');
+}
 
-  const pythonExe = getPythonExe().replace(/\\/g, '/');
+// ── Python discovery ─────────────────────────────────────────────────────────
+function probePython(cmd, extraArgs = []) {
+  const result = spawnSync(
+    cmd,
+    [...extraArgs, '-c', 'import sys; v=sys.version_info; print(v.major, v.minor, sys.executable)'],
+    { encoding: 'utf8', timeout: 5000, windowsHide: true }
+  );
+  if (result.status !== 0 || !result.stdout) return null;
 
-  // Preserve any existing sections that are not [env]
-  let existing = '';
-  if (existsSync(configPath)) {
-    existing = readFileSync(configPath, 'utf8')
-      .split('\n')
-      .filter(l => !l.startsWith('PYO3_PYTHON') && !l.startsWith('[env]'))
-      .join('\n')
-      .trimEnd();
+  const parts = result.stdout.trim().split(' ');
+  if (parts.length < 3) return null;
+
+  const major = parseInt(parts[0], 10);
+  const minor = parseInt(parts[1], 10);
+  const exe = parts.slice(2).join(' ');
+
+  if (major < 3 || (major === 3 && minor < 10)) {
+    console.warn(`  ⚠  Found Python ${major}.${minor} at "${exe}" — requires 3.10+, skipping`);
+    return null;
   }
 
-  const content = `${existing ? existing + '\n\n' : ''}# Auto-generated by scripts/setup-python.js — do not edit the lines below
-[env]
-PYO3_PYTHON = "${pythonExe}"
-`;
-  writeFileSync(configPath, content);
-  console.log(`✓ Written .cargo/config.toml  →  PYO3_PYTHON = ${pythonExe}`);
+  return { version: `${major}.${minor}`, exe };
+}
+
+function findSystemPython() {
+  const candidates = [
+    () => probePython('python3'),
+    () => probePython('python'),
+  ];
+
+  if (os.platform() === 'win32') {
+    candidates.push(() => probePython('py', ['-3']));
+
+    // Common Windows user-install locations
+    const localAppData = process.env.LOCALAPPDATA || '';
+    for (const ver of ['Python313', 'Python312', 'Python311', 'Python310']) {
+      const exe = join(localAppData, 'Programs', 'Python', ver, 'python.exe');
+      if (existsSync(exe)) candidates.push(() => probePython(exe));
+    }
+  }
+
+  for (const probe of candidates) {
+    const result = probe();
+    if (result) return result;
+  }
+  return null;
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────
 async function main() {
-  const triple = getPlatformTriple();
-  const filename = `cpython-${PYTHON_VERSION}+${BUILD_DATE}-${triple}-install_only.tar.gz`;
-  const url = `https://github.com/astral-sh/python-build-standalone/releases/download/${BUILD_DATE}/${filename}`;
-  const pythonExe = getPythonExe();
+  console.log('\n🔍  Finding system Python...\n');
 
-  // ── Download + extract python-build-standalone ───────────────────────────
-  if (existsSync(pythonExe)) {
-    console.log(`✓ Bundled Python already present: ${pythonExe}`);
+  const python = findSystemPython();
+  if (!python) {
+    console.error('❌  Python 3.10+ not found on PATH or in common install locations.');
+    console.error('    Install Python from https://python.org and ensure it is on PATH.\n');
+    process.exit(1);
+  }
+  console.log(`✓  Python ${python.version}  →  ${python.exe}\n`);
+
+  const venvDir = getVenvDir();
+  const venvPython = getVenvPython(venvDir);
+
+  // Create venv if it does not already exist
+  if (existsSync(venvPython)) {
+    console.log(`✓  Venv already exists:\n   ${venvDir}\n`);
   } else {
-    console.log(`\nDownloading Python ${PYTHON_VERSION} for ${triple} …`);
-    console.log(`  ${url}\n`);
-
-    const tmpFile = join(os.tmpdir(), filename);
-    if (!existsSync(tmpFile)) {
-      await downloadFile(url, tmpFile);
-      console.log('✓ Download complete');
-    } else {
-      console.log('✓ Using cached download from', tmpFile);
-    }
-
-    console.log(`Extracting to ${pythonDir} …`);
-    extractTarGz(tmpFile, pythonDir);
-    console.log('✓ Extraction complete');
+    console.log(`Creating venv at:\n   ${venvDir}\n`);
+    mkdirSync(venvDir, { recursive: true });
+    execSync(`"${python.exe}" -m venv "${venvDir}"`, { stdio: 'inherit' });
+    console.log('\n✓  Venv created\n');
   }
 
-  // ── Write .cargo/config.toml ─────────────────────────────────────────────
-  writeCargoConfig();
+  // Install requirements
+  console.log('Installing Python requirements...');
+  execSync(
+    `"${venvPython}" -m pip install -q --disable-pip-version-check -r "${requirementsTxt}"`,
+    { stdio: 'inherit' }
+  );
+  console.log('✓  Requirements installed\n');
 
-  // ── Install Python packages ───────────────────────────────────────────────
-  console.log('\nInstalling Python packages …');
-  execSync(`"${pythonExe}" -m pip install --upgrade pip`, { stdio: 'inherit' });
-  execSync(`"${pythonExe}" -m pip install fastmcp`, { stdio: 'inherit' });
+  // Clean up legacy PYO3_PYTHON from .cargo/config.toml (safe no-op if already clean)
+  const cargoConfig = join(projectRoot, '.cargo', 'config.toml');
+  mkdirSync(join(projectRoot, '.cargo'), { recursive: true });
+  writeFileSync(cargoConfig, '# Cargo configuration — Python is user-installed, not embedded\n');
+  console.log('✓  .cargo/config.toml cleaned\n');
 
-  if (os.platform() === 'win32') {
-    console.log('\nInstalling Windows-only packages (pywin32) …');
-    execSync(`"${pythonExe}" -m pip install pywin32`, { stdio: 'inherit' });
-    // pywin32 post-install registers COM servers and copies DLLs
-    try {
-      execSync(`"${pythonExe}" "${pythonDir}/Scripts/pywin32_postinstall.py" -install`,
-               { stdio: 'inherit' });
-    } catch (_) {
-      console.warn('  pywin32 post-install script not found — you may need to run it manually');
-    }
-  }
-
-  // ── Aggressive Cleanup (Optimizes for size and AV safety) ────────────────
-  console.log('\nStripping non-essential Python files to improve safety …');
-  
-  const junkFolders = [
-    'tcl', 'tk', 'tcl8', 'tcl8.6', 'tk8.6', 'test', 'tests', 
-    'idlelib', 'tkinter', 'distutils', 'ensurepip', 'lib2to3'
-  ];
-
-  try {
-    for (const folder of junkFolders) {
-      const p1 = join(pythonDir, folder);
-      const p2 = join(pythonDir, 'lib', folder);
-      const p3 = join(pythonDir, 'Lib', folder);
-      
-      const targets = [p1, p2, p3];
-      for (const t of targets) {
-        if (existsSync(t)) {
-          const rmCmd = os.platform() === 'win32' 
-            ? `powershell -Command "Remove-Item -Recycle -Force -RelativePath -ErrorAction SilentlyContinue '${t}'"`
-            : `rm -rf "${t}"`;
-          try { execSync(rmCmd, { stdio: 'ignore' }); } catch (_) {}
-        }
-      }
-    }
-
-    // Remove all .pyc and __pycache__
-    const cleanCmd = os.platform() === 'win32'
-      ? `powershell -Command "Get-ChildItem -Path '${pythonDir}' -Include __pycache__,.pyc,.pyo -Recycle -Force -ErrorAction SilentlyContinue | Remove-Item -Recycle -Force"`
-      : `find "${pythonDir}" -name "__pycache__" -type d -exec rm -rf {} +`;
-    execSync(cleanCmd, { stdio: 'ignore' });
-
-    // 🚨 CRITICAL: Remove all nested executables (*.exe)
-    // Dropping unsigned .exe files deeply nested inside an NSIS/MSI triggers corporate EDRs.
-    // Our Rust binary loads Python via DLLs; it never executes python.exe directly.
-    const exeCleanCmd = os.platform() === 'win32'
-      ? `powershell -Command "Get-ChildItem -Path '${pythonDir}' -Filter *.exe -Recycle -Force -ErrorAction SilentlyContinue | Remove-Item -Recycle -Force"`
-      : `find "${pythonDir}" -name "*.exe" -type f -delete`;
-    execSync(exeCleanCmd, { stdio: 'ignore' });
-    
-  } catch (_) {}
-
-  // Create the archive inside the resources folder
-  const archivePath = join(resourcesDir, 'python.tar.gz');
-  console.log(`Creating ${archivePath} (now much smaller and EXE-free) …`);
-  execSync(`tar -czf python.tar.gz python`, { cwd: resourcesDir, stdio: 'inherit' });
-
-  // NOTE: We KEEP the python/ directory in development so 'cargo run' still works.
-  console.log('\n✅  setup-python complete! (Python is minimized and EDR-friendly)\n');
+  console.log('✅  setup-python complete!\n');
   console.log('Next steps:');
-  console.log('  npm run tauri dev       — start the app in dev mode');
-  console.log('  npm run tauri build     — build the release installer');
+  console.log('  npm run tauri dev    — start the app in dev mode');
+  console.log('  npm run tauri build  — build the release installer\n');
 }
 
-main().catch((err) => {
+main().catch(err => {
   console.error('\n❌  setup-python failed:', err.message);
   process.exit(1);
 });

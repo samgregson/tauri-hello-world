@@ -1,34 +1,44 @@
-use std::path::PathBuf;
-
-// ── PyO3 ────────────────────────────────────────────────────────────────────
-use pyo3::prelude::*;
+use std::path::{Path, PathBuf};
+use std::process::Command;
 
 // ── Compile-time resource path (dev mode) ───────────────────────────────────
 // Set by build.rs; points at src-tauri/resources/ on the developer's machine.
 const DEV_RESOURCES_DIR: &str = env!("CARGO_RESOURCES_DIR");
 
-// ── Tauri command ────────────────────────────────────────────────────────────
+// ── Tauri commands ───────────────────────────────────────────────────────────
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+/// Health-check command: finds Python, ensures venv, returns version string.
+/// Used by the GUI to confirm Python is available.
 #[tauri::command]
 fn call_python_hello() -> String {
-    // We execute a simple Python call using our embedded environment.
-    // Note: We don't use run_mcp_server here, just a standard GIL call.
     let resources = get_resource_dir();
-    setup_python_env(&resources);
-    
-    // Ensure python is initialized (thread-safe, can be called multiple times)
-    pyo3::prepare_freethreaded_python();
+    let requirements = resources.join("mcp_server").join("requirements.txt");
 
-    Python::with_gil(|py| {
-        match py.run(cr"import server; print('Ping from GUI')", None, None) {
-             Ok(_) => "Python (embedded) says hello!".to_string(),
-             Err(e) => format!("Python Error: {}", e)
+    let system_python = match find_system_python() {
+        Some(p) => p,
+        None => return "❌ Python 3.10+ not found. Please install Python from python.org and ensure it is on PATH.".to_string(),
+    };
+
+    match ensure_venv(&system_python, &requirements) {
+        Ok(venv_py) => {
+            match Command::new(&venv_py)
+                .args(["-c", "import sys; print(f'Python {sys.version} is ready!')"])
+                .output()
+            {
+                Ok(out) if out.status.success() => {
+                    String::from_utf8_lossy(&out.stdout).trim().to_string()
+                }
+                Ok(out) => String::from_utf8_lossy(&out.stderr).trim().to_string(),
+                Err(e) => format!("Failed to run Python: {e}"),
+            }
         }
-    })
+        Err(e) => format!("Failed to set up Python environment: {e}"),
+    }
 }
 
 // ── Normal Tauri GUI entry point ─────────────────────────────────────────────
@@ -43,12 +53,221 @@ pub fn run() {
 
 // ── MCP server entry point ───────────────────────────────────────────────────
 
-/// Find the `resources/` directory at runtime.
+/// Run the FastMCP server on stdio.
 ///
-/// - **Production**: resources are extracted by the installer alongside the binary.
-/// - **Development**: fall back to the compile-time path inside `src-tauri/resources/`.
+/// Finds the user's Python, ensures a venv with dependencies, then
+/// **replaces the process** (exec on Unix) or **spawns-and-waits** (Windows)
+/// so that the MCP host talks directly to Python via stdio.
+pub fn run_mcp_server() {
+    let resources = get_resource_dir();
+    let requirements = resources.join("mcp_server").join("requirements.txt");
+    let server_py = resources.join("mcp_server").join("server.py");
+    let mcp_server_dir = resources.join("mcp_server");
+
+    let system_python = find_system_python().unwrap_or_else(|| {
+        eprintln!("[mcp] ERROR: Python 3.10+ not found. Please install Python from python.org");
+        std::process::exit(1);
+    });
+
+    let venv_py = ensure_venv(&system_python, &requirements).unwrap_or_else(|e| {
+        eprintln!("[mcp] ERROR: Failed to set up Python environment: {e}");
+        std::process::exit(1);
+    });
+
+    eprintln!("[mcp] Launching server: {} {}", venv_py.display(), server_py.display());
+
+    // On Unix: exec() replaces this process — Claude Desktop talks directly to Python.
+    // On Windows: spawn + forward exit code (no true exec syscall).
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        let err = Command::new(&venv_py)
+            .arg(&server_py)
+            .env("PYTHONPATH", &mcp_server_dir)
+            .current_dir(&mcp_server_dir)
+            .exec(); // never returns on success
+        eprintln!("[mcp] ERROR: exec failed: {err}");
+        std::process::exit(1);
+    }
+
+    #[cfg(not(unix))]
+    {
+        let status = Command::new(&venv_py)
+            .arg(&server_py)
+            .env("PYTHONPATH", &mcp_server_dir)
+            .current_dir(&mcp_server_dir)
+            .status()
+            .unwrap_or_else(|e| {
+                eprintln!("[mcp] ERROR: Failed to launch Python: {e}");
+                std::process::exit(1);
+            });
+        std::process::exit(status.code().unwrap_or(1));
+    }
+}
+
+// ── Python discovery ─────────────────────────────────────────────────────────
+
+/// Try to run a Python executable and return its path if it is version ≥ 3.10.
+fn probe_python(cmd: &str, extra_args: &[&str]) -> Option<PathBuf> {
+    let output = Command::new(cmd)
+        .args(extra_args)
+        .args(["-c", "import sys; v=sys.version_info; print(v.major, v.minor, sys.executable)"])
+        .output()
+        .ok()?;
+
+    if !output.status.success() {
+        return None;
+    }
+
+    let s = String::from_utf8_lossy(&output.stdout);
+    let parts: Vec<&str> = s.trim().splitn(3, ' ').collect();
+    if parts.len() < 3 {
+        return None;
+    }
+
+    let major: u32 = parts[0].parse().ok()?;
+    let minor: u32 = parts[1].parse().ok()?;
+    if major < 3 || (major == 3 && minor < 10) {
+        return None;
+    }
+
+    let exe = PathBuf::from(parts[2]);
+    if exe.exists() { Some(exe) } else { None }
+}
+
+/// Search for a user-installed Python ≥ 3.10.
+fn find_system_python() -> Option<PathBuf> {
+    // Common command names on PATH
+    for cmd in &["python3", "python"] {
+        if let Some(p) = probe_python(cmd, &[]) {
+            return Some(p);
+        }
+    }
+
+    // Windows Python Launcher
+    #[cfg(windows)]
+    if let Some(p) = probe_python("py", &["-3"]) {
+        return Some(p);
+    }
+
+    // Windows: common user-install locations under %LOCALAPPDATA%\Programs\Python
+    #[cfg(windows)]
+    {
+        if let Ok(local) = std::env::var("LOCALAPPDATA") {
+            let programs = PathBuf::from(local).join("Programs").join("Python");
+            if let Ok(entries) = std::fs::read_dir(&programs) {
+                let mut dirs: Vec<_> = entries
+                    .filter_map(|e| e.ok())
+                    .filter(|e| e.file_name().to_string_lossy().starts_with("Python3"))
+                    .collect();
+                // Sort descending so newest version wins
+                dirs.sort_by(|a, b| b.file_name().cmp(&a.file_name()));
+                for entry in dirs {
+                    let exe = entry.path().join("python.exe");
+                    if let Some(p) = probe_python(exe.to_str().unwrap_or(""), &[]) {
+                        return Some(p);
+                    }
+                }
+            }
+        }
+    }
+
+    None
+}
+
+// ── Venv management ──────────────────────────────────────────────────────────
+
+/// Base directory for app data (venv lives here).
+fn app_data_dir() -> PathBuf {
+    #[cfg(windows)]
+    {
+        std::env::var("LOCALAPPDATA")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| PathBuf::from("."))
+            .join("EngineeringTools")
+    }
+    #[cfg(not(windows))]
+    {
+        std::env::var("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .unwrap_or_else(|_| {
+                PathBuf::from(std::env::var("HOME").unwrap_or_default())
+                    .join(".local")
+                    .join("share")
+            })
+            .join("EngineeringTools")
+    }
+}
+
+fn venv_dir() -> PathBuf {
+    app_data_dir().join("venv")
+}
+
+fn venv_python(venv: &Path) -> PathBuf {
+    #[cfg(windows)]
+    return venv.join("Scripts").join("python.exe");
+    #[cfg(not(windows))]
+    return venv.join("bin").join("python");
+}
+
+/// Simple content hash used to detect when requirements.txt has changed.
+fn file_hash(path: &Path) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+    let content = std::fs::read(path).unwrap_or_default();
+    let mut h = DefaultHasher::new();
+    content.hash(&mut h);
+    h.finish()
+}
+
+/// Idempotently create the venv and install requirements.
+/// Returns the path to the venv Python executable.
+fn ensure_venv(system_python: &Path, requirements: &Path) -> Result<PathBuf, String> {
+    let venv = venv_dir();
+    let python = venv_python(&venv);
+
+    // Create venv if missing
+    if !python.exists() {
+        eprintln!("[mcp] Creating venv at {} ...", venv.display());
+        std::fs::create_dir_all(&venv).map_err(|e| e.to_string())?;
+        let status = Command::new(system_python)
+            .args(["-m", "venv"])
+            .arg(&venv)
+            .status()
+            .map_err(|e| e.to_string())?;
+        if !status.success() {
+            return Err(format!("Failed to create venv at {}", venv.display()));
+        }
+    }
+
+    // Install/update requirements when the file has changed (stamp file tracks hash)
+    let stamp = venv.join(".requirements_stamp");
+    let current_hash = format!("{:016x}", file_hash(requirements));
+    let needs_install = std::fs::read_to_string(&stamp)
+        .map(|s| s.trim() != current_hash)
+        .unwrap_or(true);
+
+    if needs_install && requirements.exists() {
+        eprintln!("[mcp] Installing Python requirements ...");
+        let status = Command::new(&python)
+            .args(["-m", "pip", "install", "-q", "--disable-pip-version-check", "-r"])
+            .arg(requirements)
+            .status()
+            .map_err(|e| e.to_string())?;
+        if status.success() {
+            let _ = std::fs::write(&stamp, &current_hash);
+        } else {
+            return Err("pip install failed".to_string());
+        }
+    }
+
+    Ok(python)
+}
+
+// ── Resource directory (dev vs production) ───────────────────────────────────
+
 fn get_resource_dir() -> PathBuf {
-    // 1. Try development path first if we are in a cargo environment.
+    // Dev mode: use compile-time path
     if std::env::var("CARGO_MANIFEST_DIR").is_ok() {
         let dev_path = PathBuf::from(DEV_RESOURCES_DIR);
         if dev_path.exists() {
@@ -56,107 +275,18 @@ fn get_resource_dir() -> PathBuf {
         }
     }
 
-    // 2. Production: resources are extracted by the installer alongside the binary.
-    let exe = std::env::current_exe()
-        .expect("Cannot determine executable path");
+    // Production: resources extracted by installer alongside the binary
+    let exe = std::env::current_exe().expect("Cannot determine executable path");
     let exe_dir = exe.parent().expect("Executable has no parent directory");
 
     for candidate in &[
-        exe_dir.join("resources"),       // Windows NSIS / plain dir
+        exe_dir.join("resources"),
         exe_dir.join("_up_").join("resources"), // macOS .app bundle
     ] {
-        let python_path = candidate.join("python");
-        // Verify it's a complete distribution by checking for lib (Unix) or Lib (Windows)
-        if python_path.join("lib").exists() || python_path.join("Lib").exists() {
+        if candidate.join("mcp_server").exists() {
             return candidate.clone();
         }
     }
 
-    // Fallback — return the best guess
     PathBuf::from(DEV_RESOURCES_DIR)
-}
-
-/// Configure `PYTHONHOME` and `PYTHONPATH` so the embedded CPython interpreter
-/// finds the bundled standard library and installed packages.
-fn setup_python_env(resources: &PathBuf) {
-    let python_home = if resources.join("python").join("lib").exists() || resources.join("python").join("Lib").exists() {
-        resources.join("python")
-    } else {
-        let archive = resources.join("python.tar.gz");
-        let data_dir = std::env::var("LOCALAPPDATA")
-            .map(PathBuf::from)
-            .unwrap_or_else(|_| resources.clone());
-        
-        let tools_dir = data_dir.join("EngineeringTools");
-        let target_python_dir = tools_dir.join("python");
-        
-        if !target_python_dir.exists() && archive.exists() {
-            eprintln!("[mcp] Extracting native Python environment to {} ...", tools_dir.display());
-            std::fs::create_dir_all(&tools_dir).ok();
-            
-            // Extract in-process to avoid triggering IT blocks against subprocess usage. 
-            if let Ok(file) = std::fs::File::open(&archive) {
-                let tar = flate2::read::GzDecoder::new(file);
-                let mut archive_reader = tar::Archive::new(tar);
-                if let Err(e) = archive_reader.unpack(&tools_dir) {
-                    eprintln!("[mcp] Error unpacking native python bundle: {}", e);
-                }
-            }
-        }
-        target_python_dir
-    };
-
-    let mcp_server_dir = resources.join("mcp_server");
-
-    // PYTHONHOME tells CPython where its own stdlib lives.
-    std::env::set_var("PYTHONHOME", &python_home);
-
-    // Build PYTHONPATH: site-packages + our server code.
-    #[cfg(windows)]
-    let site_packages = python_home.join("Lib").join("site-packages");
-    #[cfg(not(windows))]
-    let site_packages = {
-        let lib = python_home.join("lib");
-        std::fs::read_dir(&lib)
-            .ok()
-            .and_then(|mut entries| {
-                entries.find_map(|e| {
-                    let e = e.ok()?;
-                    let name = e.file_name().into_string().ok()?;
-                    if name.starts_with("python3") { Some(e.path()) } else { None }
-                })
-            })
-            .map(|p| p.join("site-packages"))
-            .unwrap_or_else(|| lib.join("python3.12").join("site-packages"))
-    };
-
-    let sep = if cfg!(windows) { ";" } else { ":" };
-    let pythonpath = [
-        mcp_server_dir.to_string_lossy().into_owned(),
-        site_packages.to_string_lossy().into_owned(),
-    ]
-    .join(sep);
-
-    std::env::set_var("PYTHONPATH", pythonpath);
-}
-
-/// Run the FastMCP server on stdio.
-/// Blocks until the MCP host closes the connection (EOF on stdin).
-pub fn run_mcp_server() {
-    let resources = get_resource_dir();
-    setup_python_env(&resources);
-
-    pyo3::prepare_freethreaded_python();
-
-    Python::with_gil(|py| {
-        let code = cr#"
-import sys
-import server
-server.mcp.run(transport="stdio")
-"#;
-        if let Err(e) = py.run(code, None, None) {
-            e.print(py);
-            std::process::exit(1);
-        }
-    });
 }

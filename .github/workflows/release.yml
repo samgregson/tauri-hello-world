@@ -28,10 +28,8 @@ jobs:
       - name: Install Frontend dependencies
         run: npm install
 
-      - name: Prepare Embedded Python Environment
-        run: npm run setup-python
-        shell: bash
-        # This script downloads the Windows portable Python and installs fastmcp/pywin32.
+      # No embedded Python setup step needed — the app finds and uses the
+      # user's system Python at runtime, creating a venv on first launch.
 
       - name: Build with Tauri Action
         uses: tauri-apps/tauri-action@v0
@@ -40,7 +38,12 @@ jobs:
         with:
           tagName: v__VERSION__
           releaseName: "Engineering Tools v__VERSION__"
-          releaseBody: "Automated release with embedded Python MCP server."
+          releaseBody: |
+            Automated release.
+
+            **Requires Python 3.10+** installed on the target machine.
+            Download Python from https://python.org — ensure it is added to PATH during installation.
+            The app will automatically create an isolated environment and install its dependencies on first use.
           releaseDraft: true
           prerelease: false
           args: --target x86_64-pc-windows-msvc

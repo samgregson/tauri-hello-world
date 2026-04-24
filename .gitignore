@@ -23,10 +23,11 @@ dist-ssr
 *.sln
 *.sw?
 
-# Bundled Python/MCP (Managed by setup-python.js)
+# Python venv lives in %LOCALAPPDATA%\EngineeringTools\venv (outside the repo).
+# .cargo/config.toml is safe to commit — it no longer contains PYO3_PYTHON.
+# Ignore any leftover bundled-python artefacts from the old architecture:
 src-tauri/resources/python/
 src-tauri/resources/python.tar.gz
-.cargo/config.toml
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

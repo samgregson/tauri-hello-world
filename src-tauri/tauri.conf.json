@@ -32,7 +32,6 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "resources/python.tar.gz": "resources/python.tar.gz",
       "resources/mcp_server/**/*": "resources/mcp_server"
     },
     "windows": {
