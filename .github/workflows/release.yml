@@ -1,8 +1,8 @@
 name: Release
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -44,6 +44,6 @@ jobs:
             **Requires Python 3.10+** installed on the target machine.
             Download Python from https://python.org — ensure it is added to PATH during installation.
             The app will automatically create an isolated environment and install its dependencies on first use.
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: --target x86_64-pc-windows-msvc
