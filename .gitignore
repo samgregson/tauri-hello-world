@@ -26,6 +26,8 @@ dist-ssr
 # Tauri sidecars
 src-tauri/bin/backend-*
 
+src-tauri/resources/
+
 # Python build artifacts
 build/
 backend/*.spec
