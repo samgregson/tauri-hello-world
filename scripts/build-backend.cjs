@@ -6,7 +6,7 @@ const path = require('path');
  * This script builds the Python backend using PyInstaller and moves it to the 
  * correct location for Tauri to find it as a sidecar.
  * 
- * Usage: node scripts/build-backend.js [target-triple]
+ * Usage: node scripts/build-backend.cjs [target-triple]
  */
 
 let targetTriple = process.env.TARGET_TRIPLE || process.argv[2];
@@ -25,7 +25,7 @@ if (!targetTriple) {
 
 if (!targetTriple) {
   console.error('Error: Please provide a target triple (e.g., x86_64-unknown-linux-gnu)');
-  console.log('Usage: node scripts/build-backend.js <target-triple>');
+  console.log('Usage: node scripts/build-backend.cjs <target-triple>');
   process.exit(1);
 }
 
@@ -38,13 +38,13 @@ function getPyInstaller() {
   try {
     execSync('pyinstaller --version', { stdio: 'ignore' });
     return 'pyinstaller';
-  } catch (e) {}
+  } catch (e) { }
 
   // 2. Check for venv (common for local dev)
-  const venvPath = isWindows 
+  const venvPath = isWindows
     ? path.join('.venv', 'Scripts', 'pyinstaller.exe')
     : path.join('venv', 'bin', 'pyinstaller');
-  
+
   if (fs.existsSync(venvPath)) {
     return venvPath;
   }
