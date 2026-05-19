@@ -31,9 +31,6 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "resources": {
-      "resources/mcp_server/**/*": "resources/mcp_server"
-    },
     "windows": {
       "webviewInstallMode": {
         "type": "skip"
