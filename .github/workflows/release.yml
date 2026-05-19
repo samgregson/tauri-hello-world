@@ -1,8 +1,8 @@
 name: Release
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -71,6 +71,6 @@ jobs:
           tagName: v__VERSION__
           releaseName: "App v__VERSION__"
           releaseBody: "Automated release from GitHub Actions"
-          releaseDraft: true
+          releaseDraft: false
           prerelease: false
           args: --target ${{ matrix.target }}
