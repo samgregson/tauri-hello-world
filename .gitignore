@@ -30,6 +30,10 @@ src-tauri/resources/python/
 src-tauri/resources/python.tar.gz
 
 # Byte-compiled / optimized / DLL files
+
+# Python build artifacts
+build/
+backend/*.spec
 __pycache__/
 *.py[codz]
 *$py.class
