@@ -23,7 +23,9 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["nsis"],
+    "targets": [
+      "nsis"
+    ],
     "externalBin": [
       "bin/backend"
     ],
@@ -38,17 +40,6 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
-    ],
-    "resources": {
-      "resources/mcp_server/**/*": "resources/mcp_server"
-    },
-    "windows": {
-      "webviewInstallMode": {
-        "type": "skip"
-      },
-      "nsis": {
-        "installMode": "currentUser"
-      }
-    }
+    ]
   }
 }

@@ -1,6 +1,16 @@
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[cfg(windows)]
+use std::os::windows::process::CommandExt;
+
+fn new_hidden_command<S: AsRef<std:"resources/mcp_server/**/*": "resources/mcp_server":ffi::OsStr>>(program: S) -> Command {
+    let mut cmd = Command::new(program);
+    #[cfg(windows)]
+    cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
+    cmd
+}
+
 // ── Compile-time resource path (dev mode) ───────────────────────────────────
 // Set by build.rs; points at src-tauri/resources/ on the developer's machine.
 const DEV_RESOURCES_DIR: &str = env!("CARGO_RESOURCES_DIR");
@@ -26,7 +36,7 @@ fn call_python_hello() -> String {
 
     match ensure_venv(&system_python, &requirements) {
         Ok(venv_py) => {
-            match Command::new(&venv_py)
+            match new_hidden_command(&venv_py)
                 .args(["-c", "import sys; print(f'Python {sys.version} is ready!')"])
                 .output()
             {
@@ -74,7 +84,11 @@ pub fn run_mcp_server() {
         std::process::exit(1);
     });
 
-    eprintln!("[mcp] Launching server: {} {}", venv_py.display(), server_py.display());
+    eprintln!(
+        "[mcp] Launching server: {} {}",
+        venv_py.display(),
+        server_py.display()
+    );
 
     // On Unix: exec() replaces this process — Claude Desktop talks directly to Python.
     // On Windows: spawn + forward exit code (no true exec syscall).
@@ -92,7 +106,7 @@ pub fn run_mcp_server() {
 
     #[cfg(not(unix))]
     {
-        let status = Command::new(&venv_py)
+        let status = new_hidden_command(&venv_py)
             .arg(&server_py)
             .env("PYTHONPATH", &mcp_server_dir)
             .current_dir(&mcp_server_dir)
@@ -137,9 +151,12 @@ pub fn setup_python_cli() {
 
 /// Try to run a Python executable and return its path if it is version ≥ 3.10.
 fn probe_python(cmd: &str, extra_args: &[&str]) -> Option<PathBuf> {
-    let output = Command::new(cmd)
+    let output = new_hidden_command(cmd)
         .args(extra_args)
-        .args(["-c", "import sys; v=sys.version_info; print(v.major, v.minor, sys.executable)"])
+        .args([
+            "-c",
+            "import sys; v=sys.version_info; print(v.major, v.minor, sys.executable)",
+        ])
         .output()
         .ok()?;
 
@@ -160,7 +177,11 @@ fn probe_python(cmd: &str, extra_args: &[&str]) -> Option<PathBuf> {
     }
 
     let exe = PathBuf::from(parts[2]);
-    if exe.exists() { Some(exe) } else { None }
+    if exe.exists() {
+        Some(exe)
+    } else {
+        None
+    }
 }
 
 /// Search for a user-installed Python ≥ 3.10.
@@ -260,7 +281,7 @@ fn ensure_venv(system_python: &Path, requirements: &Path) -> Result<PathBuf, Str
     if !python.exists() {
         eprintln!("[mcp] Creating venv at {} ...", venv.display());
         std::fs::create_dir_all(&venv).map_err(|e| e.to_string())?;
-        let status = Command::new(system_python)
+        let status = new_hidden_command(system_python)
             .args(["-m", "venv"])
             .arg(&venv)
             .status()
@@ -279,13 +300,20 @@ fn ensure_venv(system_python: &Path, requirements: &Path) -> Result<PathBuf, Str
 
     if needs_install && requirements.exists() {
         eprintln!("[mcp] Installing Python requirements ...");
-        
-        // Remove the stamp before installing, so if pip fails midway or is interrupted, 
+
+        // Remove the stamp before installing, so if pip fails midway or is interrupted,
         // the stamp is not left in a valid state while the venv is broken.
         let _ = std::fs::remove_file(&stamp);
-        
-        let status = Command::new(&python)
-            .args(["-m", "pip", "install", "-q", "--disable-pip-version-check", "-r"])
+
+        let status = new_hidden_command(&python)
+            .args([
+                "-m",
+                "pip",
+                "install",
+                "-q",
+                "--disable-pip-version-check",
+                "-r",
+            ])
             .arg(requirements)
             .status()
             .map_err(|e| e.to_string())?;
