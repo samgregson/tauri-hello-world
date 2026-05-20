@@ -23,7 +23,11 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": [
+      "deb",
+      "appimage",
+      "nsis"
+    ],
     "externalBin": [
       "bin/backend"
     ],
