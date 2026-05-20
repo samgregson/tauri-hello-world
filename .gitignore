@@ -31,6 +31,9 @@ src-tauri/resources/python.tar.gz
 
 # Byte-compiled / optimized / DLL files
 
+# Ignore resources (python backend artifacts)
+src-tauri/resources/
+
 # Python build artifacts
 build/
 backend/*.spec
