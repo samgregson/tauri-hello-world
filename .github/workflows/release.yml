@@ -36,8 +36,8 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: v__VERSION__
-          releaseName: "Engineering Tools v__VERSION__"
+          tagName: v0.1.0-dev.${{ github.run_number }}
+          releaseName: "Engineering Tools v0.1.0-dev.${{ github.run_number }}"
           releaseBody: |
             Automated release.
 

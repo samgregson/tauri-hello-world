@@ -35,4 +35,10 @@ tekla_sd.register(mcp, IS_WINDOWS)
 
 
 if __name__ == "__main__":
-    mcp.run(transport="stdio")
+    if len(sys.argv) > 1 and sys.argv[1] == "--sse":
+        # Run using Server-Sent Events (SSE) on a local port for testing from the GUI
+        print("Starting FastMCP in SSE mode for GUI testing...")
+        mcp.run(transport="sse", host="127.0.0.1", port=8000)
+    else:
+        # Default: run as a standard stdio MCP server (for Claude Desktop, etc.)
+        mcp.run(transport="stdio")

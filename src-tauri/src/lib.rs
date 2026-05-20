@@ -51,12 +51,67 @@ fn call_python_hello() -> String {
     }
 }
 
+#[tauri::command]
+fn get_mcp_tools() -> Result<String, String> {
+    let resources = get_resource_dir();
+    let mcp_dir = resources.join("mcp_server");
+    let test_py = mcp_dir.join("test_mcp.py");
+    let requirements = mcp_dir.join("requirements.txt");
+
+    let system_python = find_system_python().ok_or("Python 3.10+ not found")?;
+    let venv_py = ensure_venv(&system_python, &requirements).map_err(|e| e.to_string())?;
+
+    let output = new_hidden_command(&venv_py)
+        .arg(&test_py)
+        .env("PYTHONPATH", &mcp_dir)
+        .current_dir(&mcp_dir)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+}
+
+#[tauri::command]
+fn test_mcp_tool(tool_name: String, args_json: String) -> Result<String, String> {
+    let resources = get_resource_dir();
+    let mcp_dir = resources.join("mcp_server");
+    let test_py = mcp_dir.join("test_mcp.py");
+    let requirements = mcp_dir.join("requirements.txt");
+
+    let system_python = find_system_python().ok_or("Python 3.10+ not found")?;
+    let venv_py = ensure_venv(&system_python, &requirements).map_err(|e| e.to_string())?;
+
+    let output = new_hidden_command(&venv_py)
+        .arg(&test_py)
+        .arg(&tool_name)
+        .arg(&args_json)
+        .env("PYTHONPATH", &mcp_dir)
+        .current_dir(&mcp_dir)
+        .output()
+        .map_err(|e| e.to_string())?;
+
+    if output.status.success() {
+        Ok(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        Err(String::from_utf8_lossy(&output.stderr).to_string())
+    }
+}
+
 // ── Normal Tauri GUI entry point ─────────────────────────────────────────────
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
-        .invoke_handler(tauri::generate_handler![greet, call_python_hello])
+        .invoke_handler(tauri::generate_handler![
+            greet, 
+            call_python_hello, 
+            get_mcp_tools, 
+            test_mcp_tool
+        ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
