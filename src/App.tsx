@@ -3,6 +3,8 @@ import { invoke } from "@tauri-apps/api/core";
 import "./App.css";
 
 function App() {
+  const [greetMsg, setGreetMsg] = useState("Loading...");
+  const [connected, setConnected] = useState(false);
   const [tools, setTools] = useState<string[]>([]);
   const [selectedTool, setSelectedTool] = useState("");
   const [toolArgs, setToolArgs] = useState("{}");
