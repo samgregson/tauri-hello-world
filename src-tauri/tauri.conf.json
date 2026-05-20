@@ -26,9 +26,9 @@
     "targets": [
       "nsis"
     ],
-    "externalBin": [
-      "bin/backend"
-    ],
+    "resources": {
+      "resources/mcp_server/**/*": "resources/mcp_server"
+    },
     "windows": {
       "nsis": {
         "installMode": "currentUser"

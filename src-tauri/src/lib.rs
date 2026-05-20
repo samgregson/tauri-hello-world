@@ -4,7 +4,7 @@ use std::process::Command;
 #[cfg(windows)]
 use std::os::windows::process::CommandExt;
 
-fn new_hidden_command<S: AsRef<std:"resources/mcp_server/**/*": "resources/mcp_server":ffi::OsStr>>(program: S) -> Command {
+fn new_hidden_command<S: AsRef<std::ffi::OsStr>>(program: S) -> Command {
     let mut cmd = Command::new(program);
     #[cfg(windows)]
     cmd.creation_flags(0x08000000); // CREATE_NO_WINDOW
