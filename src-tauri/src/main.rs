@@ -24,14 +24,10 @@ fn main() {
 
     if args.iter().any(|a| a == "--mcp-server") {
         // stdio MCP server mode — no window, no Tauri runtime
-        // tauri_hello_world_lib::run_mcp_server();
-        eprintln!("Python backend temporarily disabled for IT testing.");
-        std::process::exit(1);
+        tauri_hello_world_lib::run_mcp_server();
     } else if args.iter().any(|a| a == "--setup-python") {
         // Dev helper to pre-create the Python venv
-        // tauri_hello_world_lib::setup_python_cli();
-        eprintln!("Python backend temporarily disabled for IT testing.");
-        std::process::exit(1);
+        tauri_hello_world_lib::setup_python_cli();
     } else {
         // Normal GUI mode
         tauri_hello_world_lib::run();

@@ -16,7 +16,29 @@ fn greet(name: &str) -> String {
 /// Used by the GUI to confirm Python is available.
 #[tauri::command]
 fn call_python_hello() -> String {
-    "✅ Python backend temporarily disabled for IT testing.".to_string()
+    let resources = get_resource_dir();
+    let requirements = resources.join("mcp_server").join("requirements.txt");
+
+    let system_python = match find_system_python() {
+        Some(p) => p,
+        None => return "❌ Python 3.10+ not found. Please install Python from python.org and ensure it is on PATH.".to_string(),
+    };
+
+    match ensure_venv(&system_python, &requirements) {
+        Ok(venv_py) => {
+            match Command::new(&venv_py)
+                .args(["-c", "import sys; print(f'Python {sys.version} is ready!')"])
+                .output()
+            {
+                Ok(out) if out.status.success() => {
+                    String::from_utf8_lossy(&out.stdout).trim().to_string()
+                }
+                Ok(out) => String::from_utf8_lossy(&out.stderr).trim().to_string(),
+                Err(e) => format!("Failed to run Python: {e}"),
+            }
+        }
+        Err(e) => format!("Failed to set up Python environment: {e}"),
+    }
 }
 
 // ── Normal Tauri GUI entry point ─────────────────────────────────────────────
@@ -29,7 +51,6 @@ pub fn run() {
         .expect("error while running tauri application");
 }
 
-/* --- TEMPORARILY DISABLED PYTHON BACKEND ---
 // ── MCP server entry point ───────────────────────────────────────────────────
 
 /// Run the FastMCP server on stdio.
@@ -304,4 +325,3 @@ fn get_resource_dir() -> PathBuf {
 
     PathBuf::from(DEV_RESOURCES_DIR)
 }
---------------------------------------------- */
