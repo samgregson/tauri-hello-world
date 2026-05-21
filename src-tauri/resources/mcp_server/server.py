@@ -25,7 +25,7 @@ mcp = FastMCP(
 
 # ── Register tool modules ────────────────────────────────────────────────────
 # Each module registers its tools against the shared `mcp` instance.
-from tools import excel, word, sap2000, etabs, tekla_sd  # noqa: E402
+from tools import excel, word, sap2000, etabs, tekla_sd
 
 excel.register(mcp, IS_WINDOWS)
 word.register(mcp, IS_WINDOWS)

@@ -27,7 +27,7 @@
       "nsis"
     ],
     "resources": {
-      "resources/mcp_server/**/*": "resources/mcp_server"
+      "resources/mcp_server": "resources/mcp_server"
     },
     "windows": {
       "nsis": {
