@@ -31,6 +31,12 @@ jobs:
       # No embedded Python setup step needed — the app finds and uses the
       # user's system Python at runtime, creating a venv on first launch.
 
+      - name: Update version in tauri.conf.json
+        run: |
+          $json = Get-Content src-tauri\tauri.conf.json | Out-String
+          $json = $json -replace '"version":\s*"0\.1\.0"', '"version": "0.1.0-dev.${{ github.run_number }}"'
+          $json | Out-File src-tauri\tauri.conf.json -Encoding utf8
+
       - name: Build with Tauri Action
         uses: tauri-apps/tauri-action@v0
         env:
