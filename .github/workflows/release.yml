@@ -28,8 +28,8 @@ jobs:
       - name: Install Frontend dependencies
         run: npm install
 
-      # No embedded Python setup step needed — the app finds and uses the
-      # user's system Python at runtime, creating a venv on first launch.
+      - name: Setup embedded headless Python
+        run: python scripts/setup_embedded_python.py
 
       - name: Update version in tauri.conf.json
         run: |
@@ -46,10 +46,8 @@ jobs:
           releaseName: "Engineering Tools v0.1.0-dev.${{ github.run_number }}"
           releaseBody: |
             Automated release.
-
-            **Requires Python 3.10+** installed on the target machine.
-            Download Python from https://python.org — ensure it is added to PATH during installation.
-            The app will automatically create an isolated environment and install its dependencies on first use.
+            
+            This application now features an embedded Python environment and does not require a system installation.
           releaseDraft: false
           prerelease: false
           args: --target x86_64-pc-windows-msvc
