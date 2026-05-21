@@ -5,7 +5,7 @@ import "./App.css";
 function App() {
   const [greetMsg, setGreetMsg] = useState("Loading...");
   const [connected, setConnected] = useState(false);
-  const [tools, setTools] = useState<string[]>([]);
+  const [tools, setTools] = useState<any[]>([]);
   const [selectedTool, setSelectedTool] = useState("");
   const [toolArgs, setToolArgs] = useState("{}");
   const [toolResult, setToolResult] = useState("");
@@ -28,10 +28,26 @@ function App() {
       const parsed = JSON.parse(result);
       if (parsed.tools) {
         setTools(parsed.tools);
-        if (parsed.tools.length > 0) setSelectedTool(parsed.tools[0]);
+        if (parsed.tools.length > 0) {
+          handleToolSelect(parsed.tools[0].name, parsed.tools);
+        }
       }
     } catch (error) {
       console.error("Failed to fetch tools", error);
+    }
+  }
+
+  function handleToolSelect(name: string, toolsList: any[] = tools) {
+    setSelectedTool(name);
+    const tool = toolsList.find(t => t.name === name);
+    if (tool && tool.schema && tool.schema.properties) {
+      const defaultArgs: Record<string, any> = {};
+      Object.entries(tool.schema.properties).forEach(([key, val]: [string, any]) => {
+        defaultArgs[key] = val.type === 'string' ? "" : val.type === 'number' ? 0 : val.type === 'boolean' ? false : null;
+      });
+      setToolArgs(JSON.stringify(defaultArgs, null, 2));
+    } else {
+      setToolArgs("{}");
     }
   }
 
@@ -67,20 +83,19 @@ function App() {
 
       <div style={{ backgroundColor: "#1e1e2e", padding: "1.5rem", borderRadius: "12px", border: "1px solid #313244", color: "#cdd6f4", marginBottom: "2rem" }}>
         <h3 style={{ margin: "0 0 1rem 0", color: "#a6adc8" }}>Test MCP Logic</h3>
-        <div style={{ display: "flex", gap: "10px", marginBottom: "1rem" }}>
+        <div style={{ display: "flex", gap: "10px", marginBottom: "1rem", alignItems: "flex-start" }}>
           <select 
             value={selectedTool} 
-            onChange={e => setSelectedTool(e.target.value)}
+            onChange={e => handleToolSelect(e.target.value)}
             style={{ padding: "0.5rem", borderRadius: "4px", backgroundColor: "#313244", color: "white", border: "none" }}
           >
-            {tools.map(t => <option key={t} value={t}>{t}</option>)}
+            {tools.map(t => <option key={t.name} value={t.name}>{t.name}</option>)}
           </select>
-          <input 
-            type="text" 
+          <textarea 
             value={toolArgs} 
             onChange={e => setToolArgs(e.target.value)} 
             placeholder='{"arg": "value"}'
-            style={{ flex: 1, padding: "0.5rem", borderRadius: "4px", backgroundColor: "#313244", color: "white", border: "none", fontFamily: "monospace" }}
+            style={{ flex: 1, padding: "0.5rem", borderRadius: "4px", backgroundColor: "#313244", color: "white", border: "none", fontFamily: "monospace", minHeight: "80px", resize: "vertical" }}
           />
           <button 
             onClick={runTool}
@@ -92,6 +107,19 @@ function App() {
         <pre style={{ backgroundColor: "#11111b", padding: "1rem", borderRadius: "8px", overflowX: "auto", margin: 0 }}>
           {toolResult || "Select a tool and click Run."}
         </pre>
+        {tools.find(t => t.name === selectedTool) && (
+          <div style={{ marginTop: "1rem", padding: "1rem", backgroundColor: "#11111b", borderRadius: "8px", fontSize: "0.85rem" }}>
+            <p style={{ margin: "0 0 0.5rem 0", color: "#a6e3a1", fontWeight: "bold" }}>
+              {tools.find(t => t.name === selectedTool)?.description || "No description provided."}
+            </p>
+            <details>
+              <summary style={{ cursor: "pointer", color: "#89b4fa" }}>View Schema Definition</summary>
+              <pre style={{ margin: "0.5rem 0 0 0", opacity: 0.8, overflowX: "auto" }}>
+                {JSON.stringify(tools.find(t => t.name === selectedTool)?.schema, null, 2)}
+              </pre>
+            </details>
+          </div>
+        )}
       </div>
 
       <div style={{ backgroundColor: "#1e1e2e", padding: "1.5rem", borderRadius: "12px", border: "1px solid #313244", color: "#cdd6f4" }}>
